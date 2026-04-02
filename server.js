@@ -31,7 +31,13 @@ const BRIDGE_PORT = process.env.PORT || 3000;
 const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname))); // serve index.html
-
+// Handle Render health checks
+app.use((req, res, next) => {
+  if (req.method === "HEAD") {
+    return res.status(200).end();
+  }
+  next();
+});
 // ── /fetch endpoint ──────────────────────────────────────────
 app.head('/', (req, res) => {
   res.status(200).end();
