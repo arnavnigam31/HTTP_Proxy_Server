@@ -103,6 +103,7 @@ app.get('/fetch', (req, res) => {
     const raw = rawResponse.toString('utf8', 0, rawResponse.length);
 
     // Split HTTP response headers from body
+    const raw = rawResponse.toString('utf8');
     const headerEnd = raw.indexOf('\r\n\r\n');
     if (headerEnd === -1) {
       return res.json({ ok: false, error: 'Malformed response from proxy' });
