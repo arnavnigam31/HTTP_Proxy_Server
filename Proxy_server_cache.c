@@ -1,11 +1,13 @@
 #include "proxy_parse.h" 
 #include <stdio.h>
+#include <time.h>
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <netdb.h>
 
 
 #ifdef _WIN32
@@ -220,92 +222,97 @@ int handle_request(int clientSocketId,struct ParsedRequest *request,char *tempRe
 
 }
 
-void *thread_fn(void *socketNew){
+void *thread_fn(void *socketNew) {
     sem_wait(&semaphore);
+
     int p;
-    sem_getvalue(&semaphore,&p);
-    printf("Semaphore value is %d",p);
+    sem_getvalue(&semaphore, &p);
+    printf("Semaphore value is %d\n", p);
 
-    int *t=(int *)socketNew;
-    int socket =*t;
-    int bytes_send_client,len;
+    int *t = (int *)socketNew;
+    int socket = *t;
 
-    char *buffer=(char*)calloc(MAX_BYTES,sizeof(char));
+    char *buffer = (char *)calloc(MAX_BYTES, sizeof(char));
+    memset(buffer, 0, MAX_BYTES);
 
-    memset(buffer,0,MAX_BYTES);
-
-    bytes_send_client=recv(socket,buffer,MAX_BYTES,0);
-
-    while(bytes_send_client>0){
-        len=strlen(buffer);
-        if(strstr(buffer,"\r\n\r\n")==NULL){
-            bytes_send_client=recv(socket,buffer+len,MAX_BYTES-len,0);
-        }
-        else break;
+    int bytes_send_client = recv(socket, buffer, MAX_BYTES, 0);
+    while (bytes_send_client > 0) {
+        int len = strlen(buffer);
+        if (strstr(buffer, "\r\n\r\n") == NULL) {
+            bytes_send_client = recv(socket, buffer + len, MAX_BYTES - len, 0);
+        } else break;
     }
 
-    char *tempReq=(char *)malloc(strlen(buffer)*sizeof(char)+1);
+    char *tempReq = (char *)malloc(strlen(buffer) * sizeof(char) + 1);
+    strcpy(tempReq, buffer);
 
-    for(size_t i=0;i<strlen(buffer);i++){
-        tempReq[i]=buffer[i];
-    }
-    struct cache_element*temp=find(tempReq);
+    struct cache_element *temp = find(tempReq);
 
-    if(temp!=NULL){
-        int size=temp->len/sizeof(char);
-        int pos=0;
+    if (temp != NULL) {
+        // Measure time for cache hit
+        clock_t start_hit = clock();
+
+        int size = temp->len / sizeof(char);
+        int pos = 0;
         char response[MAX_BYTES];
-        while(pos<size){
-            memset(response,0,MAX_BYTES);
-            for(int i=0;i<MAX_BYTES;i++){
-                response[i]=temp->data[i];
-                pos++;
+        while (pos < size) {
+            memset(response, 0, MAX_BYTES);
+            for (int i = 0; i < MAX_BYTES && pos < size; i++, pos++) {
+                response[i] = temp->data[pos];
             }
-            send(socket,response,MAX_BYTES,0);
+            send(socket, response, MAX_BYTES, 0);
         }
-        printf("DATA reterived from cache\n");
-        printf("%s\n\n",response);
-    }
-    else if(bytes_send_client>0){
-        len=strlen(buffer);
-        struct ParsedRequest *request=ParsedRequest_create();  
-        if(ParsedRequest_parse(request,buffer,len)<0){
-            printf("Parsing failed\n");
-            printf("Failed to parse request:\n%s\n", buffer);
-        }
-        else{
-            memset(buffer,0,MAX_BYTES);
-            if(!strcmp(request->method,"GET")){
-                if(request->host && request->path && checkHTTPversion(request->version)==1){
-                    bytes_send_client=handle_request(socket,request,tempReq);
 
-                    if(bytes_send_client==-1){
-                        sendErrorMessage(socket,500);
+        clock_t end_hit = clock();
+        double duration = (double)(end_hit - start_hit) / CLOCKS_PER_SEC;
+        printf("HIT  - Time taken to serve from cache: %.4f seconds\n", duration);
+    }
+    else if (bytes_send_client > 0) {
+        int len = strlen(buffer);
+        struct ParsedRequest *request = ParsedRequest_create();
+
+        if (ParsedRequest_parse(request, buffer, len) < 0) {
+            printf("Parsing failed. Raw buffer:\n%s\n", buffer);
+            sendErrorMessage(socket, 500);
+        } else {
+            if (!strcmp(request->method, "GET")) {
+                if (request->host && request->path && checkHTTPversion(request->version) == 1) {
+
+                    // Measure time for cache miss
+                    clock_t start_miss = clock();
+
+                    bytes_send_client = handle_request(socket, request, tempReq);
+
+                    clock_t end_miss = clock();
+                    double duration = (double)(end_miss - start_miss) / CLOCKS_PER_SEC;
+                    printf("MISS - Time taken to fetch from remote: %.4f seconds\n", duration);
+
+                    if (bytes_send_client == -1) {
+                        sendErrorMessage(socket, 500);
                     }
 
+                } else {
+                    sendErrorMessage(socket, 400);
                 }
-                else{
-                    sendErrorMessage(socket,500);
-                }
-            }
-            else{
-                printf("THis code doesnt support except GET\n");
+            } else {
+                printf("Only GET requests are supported.\n");
+                sendErrorMessage(socket, 501);
             }
         }
 
         ParsedRequest_destroy(request);
+    } else if (bytes_send_client == 0) {
+        printf("Client disconnected.\n");
     }
-    else if(bytes_send_client==0){
-        printf("Client is disconnected");
 
-    }
-    shutdown(socket,SHUT_RDWR);
-    close(socket);
+    shutdown(socket, SHUT_RDWR);
+    CLOSE_SOCKET(socket);
     free(buffer);
     sem_post(&semaphore);
     free(tempReq);
     return NULL;
 }
+
 
 int main(int argc,char *argv[]){
 
@@ -409,10 +416,10 @@ struct cache_element*find(char *url){
         site=head;
         while(site!=NULL){
             if(!strcmp(site->url,url)){
-                printf("LRU Time track : %lld",site->lru_time_track);
+                printf("LRU Time track : %ld",site->lru_time_track);
                 printf("URL found\n");
                 site->lru_time_track=time(NULL);
-                printf("LRU time track after: %lld",site->lru_time_track);
+                printf("LRU time track after: %ld",site->lru_time_track);
                 break;
             }
             site=site->next;

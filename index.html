@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>ProxyX Terminal</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=Bebas+Neue&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:       #070809;
+    --bg2:      #0c0e10;
+    --panel:    #0a0c0e;
+    --border:   #1c2128;
+    --amber:    #ffb347;
+    --amber-dim:#7a4e1a;
+    --amber-glow: rgba(255,179,71,0.15);
+    --cyan:     #4ee8c4;
+    --red:      #ff5566;
+    --green:    #4ade80;
+    --text:     #c8c0b0;
+    --muted:    #454035;
+    --mono:     'IBM Plex Mono', monospace;
+    --display:  'Bebas Neue', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%; overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    cursor: default;
+  }
+
+  /* CRT overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 9999;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.12) 3px,
+      rgba(0,0,0,0.12) 4px
+    );
+  }
+  /* Vignette */
+  body::after {
+    content: '';
+    position: fixed; inset: 0; z-index: 9998; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.7) 100%);
+  }
+
+  /* ── APP SHELL ── */
+  #app {
+    display: flex; flex-direction: column;
+    height: 100vh; overflow: hidden;
+  }
+
+  /* ── TITLEBAR ── */
+  #titlebar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 18px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .win-dots { display:flex; gap:6px; }
+  .win-dot {
+    width: 11px; height: 11px; border-radius: 50%;
+  }
+  .wd-r { background: #ff5f57; box-shadow: 0 0 6px #ff5f5755; }
+  .wd-y { background: #febc2e; box-shadow: 0 0 6px #febc2e55; }
+  .wd-g { background: #28c840; box-shadow: 0 0 6px #28c84055; }
+  #logo {
+    font-family: var(--display);
+    font-size: 1.3rem; letter-spacing: 3px;
+    color: var(--amber);
+    text-shadow: 0 0 12px var(--amber);
+    margin-left: 4px;
+  }
+  #logo span { color: var(--cyan); text-shadow: 0 0 12px var(--cyan); }
+  #tb-status {
+    margin-left: auto;
+    font-size: 0.65rem; letter-spacing: 1px;
+    color: var(--muted);
+  }
+  #tb-status b { color: var(--amber); }
+
+  /* ── INPUT BAR ── */
+  #inputbar {
+    display: flex; align-items: center; gap: 0;
+    padding: 12px 18px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #prompt {
+    font-size: 0.9rem; color: var(--amber);
+    text-shadow: 0 0 8px var(--amber);
+    margin-right: 10px; user-select: none;
+    animation: promptBlink 3s infinite;
+  }
+  @keyframes promptBlink { 0%,90%,100%{opacity:1} 95%{opacity:0.3} }
+  #url-input {
+    flex: 1;
+    background: transparent; border: none; outline: none;
+    font-family: var(--mono); font-size: 0.88rem;
+    color: #e8dfc8;
+    caret-color: var(--amber);
+  }
+  #url-input::placeholder { color: var(--muted); }
+  #fetch-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--amber);
+    color: #000; font-family: var(--mono);
+    font-size: 0.75rem; font-weight: 600;
+    letter-spacing: 1px;
+    border: none; padding: 8px 18px;
+    border-radius: 4px; cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  #fetch-btn:hover { background: #ffc870; box-shadow: 0 0 18px rgba(255,179,71,0.5); }
+  #fetch-btn:active { transform: scale(0.97); }
+  #fetch-btn.loading {
+    background: var(--amber-dim); color: var(--amber);
+    pointer-events: none;
+  }
+  #fetch-btn .spinner {
+    display: none;
+    width: 10px; height: 10px;
+    border: 2px solid rgba(0,0,0,0.3);
+    border-top-color: #000;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+  #fetch-btn.loading .spinner { display: block; }
+  #fetch-btn.loading .btn-text::after {
+    content: ''; animation: dotdot 1s infinite;
+  }
+  @keyframes dotdot { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} 100%{content:'.'} }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── MAIN PANE ── */
+  #main {
+    display: flex; flex: 1; overflow: hidden;
+    gap: 0;
+  }
+
+  /* ── CODE PANE ── */
+  #code-pane {
+    width: 45%;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+    min-width: 0;
+  }
+  .pane-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 16px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .pane-label {
+    font-size: 0.65rem; letter-spacing: 2px; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .pane-label.active { color: var(--cyan); text-shadow: 0 0 8px var(--cyan); }
+  .pane-pill {
+    margin-left: auto; font-size: 0.6rem; padding: 2px 8px;
+    border-radius: 3px; letter-spacing: 0.5px;
+  }
+  .pill-hit  { background: rgba(78,232,196,0.1); color: var(--cyan); border: 1px solid rgba(78,232,196,0.2); }
+  .pill-miss { background: rgba(255,179,71,0.1);  color: var(--amber); border: 1px solid rgba(255,179,71,0.2); }
+  .pill-err  { background: rgba(255,85,102,0.1);  color: var(--red);  border: 1px solid rgba(255,85,102,0.2); }
+  .pill-idle { background: rgba(70,64,53,0.3); color: var(--muted); border: 1px solid var(--border); }
+
+  #code-scroll {
+    flex: 1; overflow-y: auto; overflow-x: auto;
+    padding: 0;
+  }
+  #code-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  #code-scroll::-webkit-scrollbar-track { background: var(--bg2); }
+  #code-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  #code-wrap {
+    display: flex; min-height: 100%;
+  }
+  #line-nums {
+    padding: 16px 0;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    text-align: right;
+    flex-shrink: 0; user-select: none;
+    min-width: 44px;
+  }
+  .ln {
+    display: block; padding: 0 10px;
+    font-size: 0.72rem; line-height: 1.65;
+    color: var(--muted);
+  }
+  #code-content {
+    flex: 1; padding: 16px 18px;
+    font-size: 0.74rem; line-height: 1.65;
+    white-space: pre; tab-size: 2;
+    min-width: 0;
+  }
+
+  /* syntax */
+  .hl-tag    { color: #ff8fa3; }
+  .hl-attr   { color: #9ecaff; }
+  .hl-val    { color: #a8e88a; }
+  .hl-cmt    { color: var(--muted); font-style: italic; }
+  .hl-text   { color: var(--text); }
+  .hl-entity { color: var(--amber); }
+
+  /* empty state */
+  #empty-code {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100%; gap: 12px; padding: 40px;
+    text-align: center;
+  }
+  .empty-icon { font-size: 2.4rem; opacity: 0.2; }
+  .empty-txt  { font-size: 0.75rem; color: var(--muted); line-height: 1.8; }
+  .empty-hint {
+    font-size: 0.65rem; color: var(--amber-dim);
+    border: 1px dashed var(--amber-dim);
+    padding: 4px 12px; border-radius: 3px; letter-spacing: 1px;
+  }
+
+  /* ── PREVIEW PANE ── */
+  #preview-pane {
+    flex: 1;
+    display: flex; flex-direction: column;
+    overflow: hidden; min-width: 0;
+  }
+  #preview-wrap {
+    flex: 1; position: relative; overflow: hidden;
+    background: #fff;
+  }
+  #preview-frame {
+    width: 100%; height: 100%;
+    border: none;
+    display: block;
+  }
+  #preview-empty {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; background: var(--panel);
+  }
+  .pe-icon { font-size: 3rem; opacity: 0.12; }
+  .pe-txt  { font-size: 0.8rem; color: var(--muted); }
+
+  /* Loading overlay */
+  #loading-overlay {
+    position: absolute; inset: 0;
+    background: var(--panel);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; z-index: 10;
+  }
+  #loading-overlay.show { display: flex; }
+  .load-bars {
+    display: flex; gap: 5px; align-items: flex-end; height: 30px;
+  }
+  .load-bar {
+    width: 5px; background: var(--amber); border-radius: 2px;
+    animation: barBounce 0.8s ease-in-out infinite;
+    box-shadow: 0 0 8px var(--amber);
+  }
+  .load-bar:nth-child(1) { animation-delay: 0s; }
+  .load-bar:nth-child(2) { animation-delay: 0.1s; }
+  .load-bar:nth-child(3) { animation-delay: 0.2s; }
+  .load-bar:nth-child(4) { animation-delay: 0.3s; }
+  .load-bar:nth-child(5) { animation-delay: 0.4s; }
+  @keyframes barBounce {
+    0%,100% { height: 8px; }
+    50% { height: 28px; }
+  }
+  .load-txt {
+    font-size: 0.75rem; color: var(--amber);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  .load-url { font-size: 0.68rem; color: var(--muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── STATUS BAR ── */
+  #statusbar {
+    display: flex; align-items: center; gap: 20px;
+    padding: 5px 18px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    font-size: 0.62rem; letter-spacing: 0.5px;
+  }
+  .sb-item { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .sb-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .sb-dot.ok    { background: var(--green); box-shadow: 0 0 5px var(--green); }
+  .sb-dot.warn  { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+  .sb-dot.err   { background: var(--red);   box-shadow: 0 0 5px var(--red);   }
+  .sb-dot.idle  { background: var(--muted); }
+  .sb-val { color: var(--text); }
+  #sb-right { margin-left: auto; display:flex; gap:20px; }
+
+  /* ── HISTORY DROPDOWN ── */
+  #hist-wrap { position: relative; }
+  #hist-list {
+    display: none;
+    position: absolute; bottom: 100%; left: -18px;
+    width: calc(100% + 36px);
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    max-height: 160px; overflow-y: auto;
+    z-index: 1000;
+  }
+  #hist-list.show { display: block; }
+  .hist-item {
+    padding: 7px 16px; font-size: 0.75rem; color: var(--muted);
+    cursor: pointer; transition: background 0.1s;
+    border-bottom: 1px solid var(--border);
+  }
+  .hist-item:hover { background: var(--border); color: var(--amber); }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  #code-content { animation: fadeIn 0.3s ease; }
+
+  /* resize handle */
+  #resize-handle {
+    width: 4px; cursor: col-resize;
+    background: transparent;
+    transition: background 0.2s;
+    flex-shrink: 0;
+    position: relative; z-index: 5;
+  }
+  #resize-handle:hover, #resize-handle.dragging { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+  /* copy btn */
+  #copy-btn {
+    margin-left: 8px;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); font-family: var(--mono);
+    font-size: 0.6rem; letter-spacing: 0.5px;
+    padding: 2px 8px; border-radius: 3px;
+    cursor: pointer; transition: all 0.15s;
+  }
+  #copy-btn:hover { border-color: var(--amber); color: var(--amber); }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- TITLEBAR -->
+  <div id="titlebar">
+    <div class="win-dots">
+      <div class="win-dot wd-r"></div>
+      <div class="win-dot wd-y"></div>
+      <div class="win-dot wd-g"></div>
+    </div>
+    <div id="logo">PROXY<span>X</span></div>
+    <div id="tb-status">port <b id="tb-port">8080</b> &nbsp;·&nbsp; threads <b id="tb-threads">0/10</b></div>
+  </div>
+
+  <!-- INPUT BAR -->
+  <div id="inputbar">
+    <div id="hist-wrap">
+      <div id="prompt">›</div>
+      <div id="hist-list"></div>
+    </div>
+    <input id="url-input" type="text"
+      placeholder="http://www.cs.princeton.edu/   — press Enter or click FETCH"
+      autocomplete="off" spellcheck="false"/>
+    <button id="fetch-btn" onclick="doFetch()">
+      <div class="spinner"></div>
+      <span class="btn-text">FETCH</span>
+    </button>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+
+    <!-- CODE PANE -->
+    <div id="code-pane">
+      <div class="pane-header">
+        <span class="pane-label active">SOURCE</span>
+        <span id="code-pill" class="pane-pill pill-idle">IDLE</span>
+        <button id="copy-btn" onclick="copyCode()">COPY</button>
+      </div>
+      <div id="code-scroll">
+        <div id="code-wrap">
+          <div id="line-nums"></div>
+          <div id="code-content">
+            <div id="empty-code">
+              <div class="empty-icon">⌨</div>
+              <div class="empty-txt">Enter a URL above and hit FETCH<br/>The raw HTML source will appear here</div>
+              <div class="empty-hint">HTTP/1.0 · GET · LRU CACHE</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESIZE HANDLE -->
+    <div id="resize-handle"></div>
+
+    <!-- PREVIEW PANE -->
+    <div id="preview-pane">
+      <div class="pane-header">
+        <span class="pane-label active">PREVIEW</span>
+        <span id="bytes-info" class="pane-pill pill-idle">— bytes</span>
+      </div>
+      <div id="preview-wrap">
+        <div id="preview-empty">
+          <div class="pe-icon">🖥</div>
+          <div class="pe-txt">Preview renders here</div>
+        </div>
+        <div id="loading-overlay">
+          <div class="load-bars">
+            <div class="load-bar"></div>
+            <div class="load-bar"></div>
+            <div class="load-bar"></div>
+            <div class="load-bar"></div>
+            <div class="load-bar"></div>
+          </div>
+          <div class="load-txt">FETCHING</div>
+          <div class="load-url" id="load-url-txt"></div>
+        </div>
+        <iframe id="preview-frame" sandbox="allow-same-origin allow-scripts" style="display:none"></iframe>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- STATUS BAR -->
+  <div id="statusbar">
+    <div class="sb-item">
+      <div class="sb-dot idle" id="sb-dot"></div>
+      <span id="sb-status">ready</span>
+    </div>
+    <div class="sb-item">cache <span class="sb-val" id="sb-cache">—</span></div>
+    <div class="sb-item">time <span class="sb-val" id="sb-time">—</span></div>
+    <div id="sb-right">
+      <div class="sb-item">lines <span class="sb-val" id="sb-lines">—</span></div>
+      <div class="sb-item">HTTP/1.0</div>
+      <div class="sb-item">ProxyX v1.0</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── CONFIG ─────────────────────────────────────────────
+// The Node.js bridge server listens on 3000
+// Change this if you run it on a different port
+const API_BASE = 'http://localhost:3000';
+
+// ── STATE ──────────────────────────────────────────────
+let history = [];
+let currentCode = '';
+let threadCount = 0;
+
+// ── INPUT HANDLING ─────────────────────────────────────
+const input = document.getElementById('url-input');
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doFetch();
+  if (e.key === 'ArrowUp') showHistory();
+});
+input.addEventListener('blur', () => {
+  setTimeout(() => hideHistory(), 150);
+});
+
+function showHistory() {
+  const list = document.getElementById('hist-list');
+  if (!history.length) return;
+  list.innerHTML = history.slice().reverse().map(u =>
+    `<div class="hist-item" onclick="selectHistory('${u}')">${u}</div>`
+  ).join('');
+  list.classList.add('show');
+}
+function hideHistory() {
+  document.getElementById('hist-list').classList.remove('show');
+}
+function selectHistory(url) {
+  input.value = url;
+  hideHistory();
+  input.focus();
+}
+
+// ── FETCH ──────────────────────────────────────────────
+async function doFetch() {
+  let url = input.value.trim();
+  if (!url) return;
+  if (!url.startsWith('http')) url = 'http://' + url;
+  input.value = url;
+
+  setLoading(true, url);
+  const t0 = performance.now();
+
+  try {
+    const res = await fetch(`${API_BASE}/fetch?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(3);
+
+    if (!data.ok) throw new Error(data.error || 'Unknown error');
+
+    // Add to history
+    if (!history.includes(url)) {
+      history.push(url);
+      if (history.length > 20) history.shift();
+    }
+
+    renderCode(data.html);
+    renderPreview(data.html, url);
+    setStatus(data.cache === 'HIT', data.bytes, elapsed, data.cache);
+    updateThreads();
+
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── RENDER CODE ────────────────────────────────────────
+function renderCode(html) {
+  currentCode = html;
+  const lines = html.split('\n');
+  const lineNums = document.getElementById('line-nums');
+  const content  = document.getElementById('code-content');
+
+  lineNums.innerHTML = lines.map((_,i) =>
+    `<span class="ln">${i+1}</span>`
+  ).join('');
+
+  content.innerHTML = lines.map(line => highlightLine(line)).join('\n');
+
+  document.getElementById('sb-lines').textContent = lines.length;
+}
+
+function highlightLine(line) {
+  // Simple HTML syntax highlighter
+  let safe = line
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+
+  // comments
+  safe = safe.replace(/(&lt;!--.*?--&gt;)/g, '<span class="hl-cmt">$1</span>');
+  // tags
+  safe = safe.replace(
+    /(&lt;\/?)([\w\-]+)((?:\s[^&]*?)?)(\/?\s*&gt;)/g,
+    (_, open, tag, attrs, close) => {
+      const coloredAttrs = attrs.replace(
+        /([\w\-:]+)(=)(&quot;[^&]*?&quot;|&#39;[^&]*?&#39;|\S+)/g,
+        '<span class="hl-attr">$1</span><span class="hl-text">$2</span><span class="hl-val">$3</span>'
+      );
+      return `<span class="hl-tag">${open}${tag}</span>${coloredAttrs}<span class="hl-tag">${close}</span>`;
+    }
+  );
+
+  return safe || ' ';
+}
+
+// ── RENDER PREVIEW ─────────────────────────────────────
+function renderPreview(html, baseUrl) {
+  // Inject base tag so relative URLs resolve correctly
+  const withBase = html.replace(
+    /<head([^>]*)>/i,
+    `<head$1><base href="${baseUrl}">`
+  );
+  const frame = document.getElementById('preview-frame');
+  const empty = document.getElementById('preview-empty');
+
+  frame.srcdoc = withBase;
+  frame.style.display = 'block';
+  empty.style.display = 'none';
+}
+
+// ── LOADING STATE ──────────────────────────────────────
+function setLoading(on, url) {
+  const btn = document.getElementById('fetch-btn');
+  const overlay = document.getElementById('loading-overlay');
+  const loadUrl = document.getElementById('load-url-txt');
+
+  btn.classList.toggle('loading', on);
+  document.querySelector('#fetch-btn .btn-text').textContent = on ? 'FETCHING' : 'FETCH';
+  overlay.classList.toggle('show', on);
+  if (url) loadUrl.textContent = url;
+
+  if (on) {
+    setStatusBar('warn', 'fetching…', '—', '—');
+  }
+}
+
+// ── STATUS ─────────────────────────────────────────────
+function setStatus(isHit, bytes, time, cacheLabel) {
+  const dot   = document.getElementById('sb-dot');
+  const pill  = document.getElementById('code-pill');
+  const binfo = document.getElementById('bytes-info');
+
+  dot.className = 'sb-dot ok';
+  document.getElementById('sb-status').textContent = 'ok';
+  document.getElementById('sb-cache').textContent  = cacheLabel || (isHit ? 'HIT' : 'MISS');
+  document.getElementById('sb-time').textContent   = time + 's';
+
+  if (isHit) {
+    pill.className = 'pane-pill pill-hit';
+    pill.textContent = 'CACHE HIT';
+  } else {
+    pill.className = 'pane-pill pill-miss';
+    pill.textContent = 'CACHE MISS';
+  }
+
+  const kb = (bytes / 1024).toFixed(1);
+  binfo.className = 'pane-pill pill-hit';
+  binfo.textContent = kb + ' KB';
+}
+
+function setError(msg) {
+  const dot  = document.getElementById('sb-dot');
+  const pill = document.getElementById('code-pill');
+  dot.className = 'sb-dot err';
+  document.getElementById('sb-status').textContent = 'error';
+  pill.className = 'pane-pill pill-err';
+  pill.textContent = 'ERROR';
+
+  const content = document.getElementById('code-content');
+  content.textContent = `// Error: ${msg}\n\n// Make sure:\n//  1. Your C proxy is running: ./proxy 8080\n//  2. The Node.js bridge is running: node server.js\n//  3. The URL uses http:// (not https://)`;
+  document.getElementById('line-nums').innerHTML = '';
+
+  document.getElementById('preview-frame').style.display = 'none';
+  document.getElementById('preview-empty').style.display = 'flex';
+}
+
+function setStatusBar(dotClass, statusTxt, cache, time) {
+  document.getElementById('sb-dot').className = 'sb-dot ' + dotClass;
+  document.getElementById('sb-status').textContent = statusTxt;
+  document.getElementById('sb-cache').textContent  = cache;
+  document.getElementById('sb-time').textContent   = time;
+}
+
+// ── COPY ───────────────────────────────────────────────
+function copyCode() {
+  if (!currentCode) return;
+  navigator.clipboard.writeText(currentCode).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'COPIED!';
+    setTimeout(() => btn.textContent = 'COPY', 1500);
+  });
+}
+
+// ── THREADS ANIMATION ──────────────────────────────────
+function updateThreads() {
+  threadCount = Math.min(threadCount + 1, 10);
+  document.getElementById('tb-threads').textContent = threadCount + '/10';
+  setTimeout(() => {
+    threadCount = Math.max(threadCount - 1, 0);
+    document.getElementById('tb-threads').textContent = threadCount + '/10';
+  }, 1200);
+}
+
+// ── RESIZE HANDLE ──────────────────────────────────────
+const handle = document.getElementById('resize-handle');
+const codePane = document.getElementById('code-pane');
+let dragging = false, startX = 0, startW = 0;
+
+handle.addEventListener('mousedown', e => {
+  dragging = true; startX = e.clientX;
+  startW = codePane.getBoundingClientRect().width;
+  handle.classList.add('dragging');
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+});
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - startX;
+  const newW = Math.min(Math.max(startW + dx, 200), window.innerWidth - 300);
+  codePane.style.width = newW + 'px';
+  codePane.style.flex = 'none';
+});
+document.addEventListener('mouseup', () => {
+  dragging = false;
+  handle.classList.remove('dragging');
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+});
+
+// ── PORT FROM URL PARAM ────────────────────────────────
+const params = new URLSearchParams(location.search);
+if (params.get('port')) document.getElementById('tb-port').textContent = params.get('port');
+</script>
+</body>
+</html>

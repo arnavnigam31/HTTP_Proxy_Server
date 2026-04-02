@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-Wall -pthread
-LIBS=-lws2_32
+LIBS=
 
 all: proxy_server
 
