@@ -33,6 +33,9 @@ app.use(cors());
 app.use(express.static(path.join(__dirname))); // serve index.html
 
 // ── /fetch endpoint ──────────────────────────────────────────
+app.head('/', (req, res) => {
+  res.status(200).end();
+});
 app.get('/fetch', (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) {
