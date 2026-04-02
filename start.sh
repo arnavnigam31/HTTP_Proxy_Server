@@ -7,4 +7,4 @@ echo "Starting proxy..."
 ./proxy_server 8080 &
 
 echo "Starting node bridge..."
-node server.js 8080
+node server.js 
