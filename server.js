@@ -100,11 +100,8 @@ app.get('/fetch', (req, res) => {
     if (!connected || res.headersSent) return;
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(3);
-    const raw = rawResponse.toString('utf8', 0, rawResponse.length);
-
-    // Split HTTP response headers from body
     const raw = rawResponse.toString('utf8');
-    const headerEnd = raw.indexOf('\r\n\r\n');
+    const headerEnd = raw.search(/\r?\n\r?\n/);
     if (headerEnd === -1) {
       return res.json({ ok: false, error: 'Malformed response from proxy' });
     }
