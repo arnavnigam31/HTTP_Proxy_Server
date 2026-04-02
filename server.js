@@ -26,7 +26,7 @@ const cors    = require('cors');
 
 const PROXY_HOST  = '127.0.0.1';
 const PROXY_PORT  = parseInt(process.argv[2]) || 8080;
-const BRIDGE_PORT = parseInt(process.argv[3]) || 3000;
+const BRIDGE_PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(cors());
