@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # Proxy Server with Caching
 
 ## Overview
